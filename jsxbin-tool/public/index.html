@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>jsxer — JSXBin Decompiler</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,700;1,400&family=Syne:wght@400;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #0b0c10;
+    --panel: #0f1117;
+    --surface: #13151d;
+    --border: #1c1e2a;
+    --accent: #00d4aa;
+    --accent-dim: rgba(0,212,170,0.12);
+    --red: #ff5e6c;
+    --red-dim: rgba(255,94,108,0.12);
+    --yellow: #f0c040;
+    --text: #dde2f0;
+    --muted: #4a5070;
+    --mono: 'JetBrains Mono', monospace;
+    --display: 'Syne', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    min-height: 100vh;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+  }
+
+  /* scanlines */
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.06) 2px, rgba(0,0,0,0.06) 4px);
+    pointer-events: none;
+    z-index: 999;
+  }
+
+  /* ── HEADER ── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 32px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    position: relative;
+    z-index: 10;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-family: var(--display);
+    font-weight: 800;
+    font-size: 1.15rem;
+    letter-spacing: -0.5px;
+  }
+
+  .logo-mark {
+    font-size: 1.5rem;
+    background: linear-gradient(135deg, var(--accent), #00b4ff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    filter: drop-shadow(0 0 12px rgba(0,212,170,0.5));
+  }
+
+  .version-pill {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    padding: 3px 9px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    letter-spacing: 0.5px;
+  }
+
+  /* status indicator */
+  #statusIndicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.72rem;
+    color: var(--muted);
+  }
+
+  .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+    flex-shrink: 0;
+    transition: background 0.3s, box-shadow 0.3s;
+  }
+  .dot.ok { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  .dot.err { background: var(--red); box-shadow: 0 0 8px var(--red); }
+  .dot.loading { background: var(--yellow); animation: blink 0.8s infinite; }
+
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+  /* ── SETUP BANNER ── */
+  #setupBanner {
+    background: var(--accent-dim);
+    border-bottom: 1px solid rgba(0,212,170,0.2);
+    padding: 12px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    font-size: 0.78rem;
+    color: var(--accent);
+    transition: all 0.3s;
+  }
+
+  #setupBanner.hidden { display: none; }
+  #setupBanner.error { background: var(--red-dim); border-color: rgba(255,94,108,0.2); color: var(--red); }
+
+  .setup-btn {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    padding: 6px 16px;
+    border-radius: 6px;
+    border: 1px solid var(--accent);
+    background: var(--accent-dim);
+    color: var(--accent);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all 0.15s;
+    letter-spacing: 0.5px;
+  }
+
+  .setup-btn:hover { background: var(--accent); color: #000; }
+  .setup-btn:disabled { opacity: 0.5; cursor: wait; }
+
+  /* ── MAIN ── */
+  main {
+    display: grid;
+    grid-template-columns: 1fr 56px 1fr;
+    min-height: 0;
+    position: relative;
+    z-index: 10;
+  }
+
+  .pane {
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+    min-width: 0;
+  }
+
+  .pane:last-child { border-right: none; }
+
+  .pane-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+
+  .pane-label {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--muted);
+  }
+
+  .pane-actions { display: flex; gap: 6px; }
+
+  .btn {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    padding: 4px 10px;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.15s;
+    letter-spacing: 0.3px;
+  }
+
+  .btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+
+  .btn.primary {
+    border-color: rgba(0,212,170,0.4);
+    color: var(--accent);
+    background: var(--accent-dim);
+  }
+
+  .btn.primary:hover { background: var(--accent); color: #000; border-color: var(--accent); }
+
+  /* drop area */
+  .drop-area {
+    margin: 10px 14px 4px;
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    padding: 9px 14px;
+    font-size: 0.7rem;
+    color: var(--muted);
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.2s;
+    flex-shrink: 0;
+  }
+
+  .drop-area:hover, .drop-area.over {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-dim);
+  }
+
+  input[type=file] { display: none; }
+
+  textarea {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    resize: none;
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    line-height: 1.75;
+    color: var(--text);
+    padding: 14px 16px;
+    tab-size: 2;
+  }
+
+  textarea::placeholder { color: var(--muted); opacity: 0.55; font-style: italic; }
+  textarea[readonly] { color: #8898c0; }
+
+  .pane-foot {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    font-size: 0.68rem;
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+
+  .pane-foot .chars { margin-left: auto; }
+
+  /* ── CENTER COLUMN ── */
+  .mid {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    gap: 14px;
+  }
+
+  .run-btn {
+    writing-mode: vertical-lr;
+    transform: rotate(180deg);
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 0.72rem;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    padding: 22px 13px;
+    background: linear-gradient(180deg, var(--accent), #00b4ff);
+    color: #000;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .run-btn:hover { filter: brightness(1.15); transform: rotate(180deg) scale(1.04); }
+  .run-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: rotate(180deg); filter: none; }
+
+  .spinner {
+    width: 12px; height: 12px;
+    border: 2px solid rgba(0,0,0,0.3);
+    border-top-color: #000;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    display: none;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── FOOTER ── */
+  footer {
+    padding: 10px 32px;
+    border-top: 1px solid var(--border);
+    background: var(--panel);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.68rem;
+    color: var(--muted);
+    position: relative;
+    z-index: 10;
+  }
+
+  kbd {
+    display: inline-block;
+    background: var(--border);
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-family: var(--mono);
+    font-size: 0.63rem;
+  }
+
+  /* ── TOAST ── */
+  #toast {
+    position: fixed;
+    bottom: 22px; right: 22px;
+    z-index: 9999;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-size: 0.78rem;
+    transform: translateY(60px);
+    opacity: 0;
+    transition: all 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+    max-width: 300px;
+  }
+
+  #toast.show { transform: translateY(0); opacity: 1; }
+  #toast.ok { border-color: var(--accent); color: var(--accent); }
+  #toast.err { border-color: var(--red); color: var(--red); }
+
+  /* ── TOGGLE ── */
+  .toggle-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .toggle-track {
+    display: flex;
+    background: var(--border);
+    border-radius: 20px;
+    padding: 2px;
+    gap: 2px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .toggle-opt {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    padding: 3px 10px;
+    border-radius: 16px;
+    color: var(--muted);
+    transition: color 0.2s;
+    letter-spacing: 0.5px;
+    position: relative;
+    z-index: 2;
+  }
+
+  .toggle-opt.active { color: #000; }
+
+  .toggle-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    height: calc(100% - 4px);
+    width: calc(50% - 2px);
+    background: var(--accent);
+    border-radius: 16px;
+    transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+    z-index: 1;
+  }
+
+  .toggle-wrap.lines .toggle-thumb {
+    transform: translateX(100%);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <span class="logo-mark">⟨/⟩</span>
+    jsxer
+    <span class="version-pill">v1.7.4</span>
+  </div>
+  <div id="statusIndicator">
+    <div class="dot" id="dot"></div>
+    <span id="statusText">Checking…</span>
+  </div>
+</header>
+
+<!-- Setup banner -->
+<div id="setupBanner" class="hidden">
+  <span id="bannerMsg">jsxer binary not found. Download it to get started (≈2 MB).</span>
+  <button class="setup-btn" id="setupBtn" onclick="setup()">Download jsxer</button>
+</div>
+
+<main>
+  <!-- Input pane -->
+  <div class="pane">
+    <div class="pane-head">
+      <span class="pane-label">Input · jsxbin</span>
+      <div class="pane-actions">
+        <button class="btn" onclick="clearAll()">Clear</button>
+        <button class="btn primary" onclick="document.getElementById('fileInput').click()">Open File</button>
+        <input type="file" id="fileInput" accept=".jsxbin,.jsx,.txt" onchange="loadFile(event)" />
+      </div>
+    </div>
+
+    <div class="drop-area" id="dropArea"
+      onclick="document.getElementById('fileInput').click()"
+      ondragover="onDragOver(event)"
+      ondragleave="onDragLeave(event)"
+      ondrop="onDrop(event)">
+      ↓ Drop .jsxbin file here
+    </div>
+
+    <textarea id="input"
+      placeholder="Paste JSXBin content here…&#10;&#10;Must start with  @JSXBIN@ES@2.0@&#10;(or similar header)"
+      oninput="updateChars()">
+    </textarea>
+
+    <div class="pane-foot">
+      <div class="dot" id="inDot"></div>
+      <span id="inStatus">Ready</span>
+      <span class="chars" id="inChars"></span>
+    </div>
+  </div>
+
+  <!-- Center -->
+  <div class="mid">
+    <button class="run-btn" id="runBtn" onclick="decode()">
+      <span class="spinner" id="spinner"></span>
+      <span id="runLabel">Decode</span>
+    </button>
+  </div>
+
+  <!-- Output pane -->
+  <div class="pane">
+    <div class="pane-head">
+      <span class="pane-label">Output · jsx</span>
+      <div class="pane-actions">
+        <button class="btn" onclick="copyOutput()">Copy</button>
+        <button class="btn primary" onclick="downloadOutput()">Save .jsx</button>
+      </div>
+    </div>
+
+    <textarea id="output" readonly placeholder="Decompiled JSX will appear here…"></textarea>
+
+    <div class="pane-foot">
+      <div class="dot" id="outDot"></div>
+      <span id="outStatus">Waiting</span>
+      <span class="chars" id="outChars"></span>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <span>Powered by <a href="https://github.com/AngeloD2022/jsxer" style="color:var(--accent);text-decoration:none">jsxer</a> by AngeloD2022 · All processing is local</span>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <span style="font-size:0.65rem;color:var(--muted);letter-spacing:1px;text-transform:uppercase;">Count</span>
+    <div class="toggle-wrap" id="countToggle" onclick="toggleCountMode()">
+      <div class="toggle-track">
+        <span class="toggle-opt active" id="optChars">chars</span>
+        <span class="toggle-opt" id="optLines">lines</span>
+      </div>
+      <div class="toggle-thumb" id="toggleThumb"></div>
+    </div>
+    <span style="margin-left:4px"><kbd>Ctrl+Enter</kbd> decode &nbsp; <kbd>Ctrl+S</kbd> save</span>
+  </div>
+</footer>
+
+<div id="toast"></div>
+
+<script>
+// ── Status check on load ──────────────────────────────────────────────────
+async function checkStatus() {
+  try {
+    const res = await fetch('/status');
+    const data = await res.json();
+
+    const banner = document.getElementById('setupBanner');
+    const dot = document.getElementById('dot');
+    const statusText = document.getElementById('statusText');
+
+    if (data.ready) {
+      dot.className = 'dot ok';
+      statusText.textContent = `jsxer ${data.version} ready`;
+      banner.classList.add('hidden');
+    } else if (!data.supported) {
+      dot.className = 'dot err';
+      statusText.textContent = `Platform ${data.platform} not supported`;
+      banner.classList.remove('hidden');
+      banner.classList.add('error');
+      document.getElementById('bannerMsg').textContent =
+        `No prebuilt binary for ${data.platform}. Build jsxer from source: github.com/AngeloD2022/jsxer`;
+      document.getElementById('setupBtn').style.display = 'none';
+    } else {
+      dot.className = 'dot loading';
+      statusText.textContent = 'Binary not downloaded';
+      banner.classList.remove('hidden');
+    }
+  } catch (e) {
+    document.getElementById('dot').className = 'dot err';
+    document.getElementById('statusText').textContent = 'Server error';
+  }
+}
+
+async function setup() {
+  const btn = document.getElementById('setupBtn');
+  const msg = document.getElementById('bannerMsg');
+  btn.disabled = true;
+  btn.textContent = 'Downloading…';
+  msg.textContent = 'Downloading jsxer binary from GitHub…';
+
+  document.getElementById('dot').className = 'dot loading';
+  document.getElementById('statusText').textContent = 'Downloading…';
+
+  try {
+    const res = await fetch('/setup', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      showToast('ok', 'jsxer downloaded successfully!');
+      await checkStatus();
+    } else {
+      showToast('err', data.error || 'Download failed');
+      btn.disabled = false;
+      btn.textContent = 'Retry';
+    }
+  } catch (e) {
+    showToast('err', 'Network error');
+    btn.disabled = false;
+    btn.textContent = 'Retry';
+  }
+}
+
+// ── Decode ────────────────────────────────────────────────────────────────
+async function decode() {
+  const content = document.getElementById('input').value.trim();
+  if (!content) { showToast('err', 'Paste some JSXBin content first'); return; }
+
+  setRunning(true);
+  setOutStatus('loading', 'Decompiling…');
+
+  try {
+    const res = await fetch('/decode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content })
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      document.getElementById('output').value = data.result;
+      setOutStatus('ok', 'Done ✓');
+      updateChars();
+      showToast('ok', 'Decompiled successfully!');
+    } else {
+      setOutStatus('err', 'Failed');
+      showToast('err', data.error || 'Decompilation failed');
+    }
+  } catch (e) {
+    setOutStatus('err', 'Server unreachable');
+    showToast('err', 'Cannot reach server');
+  } finally {
+    setRunning(false);
+  }
+}
+
+// ── File handling ─────────────────────────────────────────────────────────
+function loadFile(e) {
+  const f = e.target.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    document.getElementById('input').value = ev.target.result;
+    setInStatus('ok', f.name);
+    updateChars();
+  };
+  reader.readAsText(f);
+}
+
+function onDragOver(e) { e.preventDefault(); document.getElementById('dropArea').classList.add('over'); }
+function onDragLeave() { document.getElementById('dropArea').classList.remove('over'); }
+function onDrop(e) {
+  e.preventDefault();
+  document.getElementById('dropArea').classList.remove('over');
+  const f = e.dataTransfer.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    document.getElementById('input').value = ev.target.result;
+    setInStatus('ok', f.name);
+    updateChars();
+  };
+  reader.readAsText(f);
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────────
+function clearAll() {
+  document.getElementById('input').value = '';
+  document.getElementById('output').value = '';
+  setInStatus('idle', 'Ready');
+  setOutStatus('idle', 'Waiting');
+  updateChars();
+}
+
+function copyOutput() {
+  const v = document.getElementById('output').value;
+  if (!v) { showToast('err', 'Nothing to copy'); return; }
+  navigator.clipboard.writeText(v).then(() => showToast('ok', 'Copied!'));
+}
+
+function downloadOutput() {
+  const v = document.getElementById('output').value;
+  if (!v) { showToast('err', 'Nothing to download'); return; }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([v], { type: 'text/plain' }));
+  a.download = 'output.jsx';
+  a.click();
+  showToast('ok', 'Saved as output.jsx');
+}
+
+function setRunning(on) {
+  const btn = document.getElementById('runBtn');
+  const spinner = document.getElementById('spinner');
+  const label = document.getElementById('runLabel');
+  btn.disabled = on;
+  spinner.style.display = on ? 'block' : 'none';
+  label.textContent = on ? '…' : 'Decode';
+}
+
+function setInStatus(state, msg) {
+  document.getElementById('inDot').className = 'dot' + (state === 'ok' ? ' ok' : state === 'err' ? ' err' : '');
+  document.getElementById('inStatus').textContent = msg;
+}
+
+function setOutStatus(state, msg) {
+  document.getElementById('outDot').className = 'dot' + (state === 'ok' ? ' ok' : state === 'err' ? ' err' : state === 'loading' ? ' loading' : '');
+  document.getElementById('outStatus').textContent = msg;
+}
+
+// ── Count mode toggle ─────────────────────────────────────────────────────
+let countMode = 'chars'; // 'chars' or 'lines'
+
+function toggleCountMode() {
+  countMode = countMode === 'chars' ? 'lines' : 'chars';
+  const wrap = document.getElementById('countToggle');
+  const optChars = document.getElementById('optChars');
+  const optLines = document.getElementById('optLines');
+
+  if (countMode === 'lines') {
+    wrap.classList.add('lines');
+    optChars.classList.remove('active');
+    optLines.classList.add('active');
+  } else {
+    wrap.classList.remove('lines');
+    optChars.classList.add('active');
+    optLines.classList.remove('active');
+  }
+  updateChars();
+}
+
+function updateChars() {
+  const i = document.getElementById('input').value;
+  const o = document.getElementById('output').value;
+
+  if (countMode === 'lines') {
+    const iLines = i.trim() ? i.split('\n').length : 0;
+    const oLines = o.trim() ? o.split('\n').length : 0;
+    document.getElementById('inChars').textContent = iLines ? `${iLines.toLocaleString()} lines` : '';
+    document.getElementById('outChars').textContent = oLines ? `${oLines.toLocaleString()} lines` : '';
+  } else {
+    document.getElementById('inChars').textContent = i.length ? `${i.length.toLocaleString()} chars` : '';
+    document.getElementById('outChars').textContent = o.length ? `${o.length.toLocaleString()} chars` : '';
+  }
+
+  if (i.length) setInStatus('ok', 'Input ready');
+}
+
+let toastTimer;
+function showToast(type, msg) {
+  const t = document.getElementById('toast');
+  t.className = `toast show ${type}`;
+  t.textContent = (type === 'ok' ? '✓ ' : '✗ ') + msg;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+// ── Keyboard shortcuts ────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); decode(); }
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); downloadOutput(); }
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────
+checkStatus();
+</script>
+</body>
+</html>
